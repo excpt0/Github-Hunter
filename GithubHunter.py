@@ -69,32 +69,41 @@ def hunter(username, password, keywords):
     sleep(1)
     results = []
     pbar = tqdm(total=len(keywords) * 9)
+
+    urls = {}
+
     for words in keywords:
+        query = 'https://github.com/search?o=desc&p=1&q={}&type=Code'.format('+'.join(words))
+        result = parse(query, s, words)
+
+        if result and result['url'] not in urls:
+            results.append(result)
+            urls[result['url']] = None
+
         for page in range(1, 10):
-            # s=indexed removed
-            query = 'o=desc&p={}&q={}&type=Code'.format(page, '+'.join(words))
-            resp = s.get('https://github.com/search?' + query)
-            dom_tree_code = etree.HTML(resp.text)
+            query = 'https://github.com/search?o=desc&p={}&s=indexed&q={}&type=Code'.format(page, '+'.join(words))
+            result = parse(query, s, words)
 
-            items = dom_tree_code.xpath('//div[@class="hx_hit-code code-list-item d-flex py-4 code-list-item-public "]')
-
-            for item in items:
-                url = 'https://github.com' + item.xpath('div/div[@class="f4 text-normal"]/a/@href')[0]
-                code_items = item.xpath('div//span[@class="text-bold bg-yellow-light rounded-1 d-inline-block"]')
-                code = []
-
-                for div in code_items:
-                    result = etree.tostring(div, pretty_print=True, method="html")
-
-                    if any([w.lower() in code for w in words]):
-                        code.append(str(result, encoding='utf-8'))
-
-                if code:
-                    results.append({'url': url, 'code': '\n'.join(code)})
+            if result and result['url'] not in urls:
+                results.append(result)
+                urls[result['url']] = None
 
             pbar.update()
 
     return results
+
+
+def parse(query, s, words):
+    resp = s.get(query)
+    dom_tree_code = etree.HTML(resp.text)
+    items = dom_tree_code.xpath('//div[@class="hx_hit-code code-list-item d-flex py-4 code-list-item-public "]')
+    for item in items:
+        url = 'https://github.com' + item.xpath('div/div[@class="f4 text-normal"]/a/@href')[0]
+        code_items = item.xpath('div//span[@class="text-bold bg-yellow-light rounded-1 d-inline-block"]/text()')
+
+        code_items_txt = [c.lower() for c in code_items]
+        if code_items and all([w.lower() in set(code_items_txt) for w in words]):
+            return {'url': url, 'matches': '\n'.join(code_items)}
 
 
 def make_db_record(url, code):
@@ -135,12 +144,9 @@ def handle_exception(error, tb):
         print(e)
 
 
-def format_record(url, code, words):
-    formatted = code.replace(words[0],'<em style="color:red">' + words[0] + '</em>')
-    formatted = formatted.replace(words[1],'<em style="color:red">' + words[1] + '</em>')
+def format_record(url, words):
     return '<br><br><br>' + 'link：' + url + '<br><br>' + \
-        'Keywords: <em style="color:red">{}</em><br><br>'.format(', '.join(words)) + \
-        'Code： <br><div style="border:1px solid #bfd1eb;background:#f3faff">' + formatted + '</div>'
+        'Keywords: <em style="color:red">{}</em><br><br>'.format(', '.join(words))
 
 
 def save_report(filename, results):
@@ -169,20 +175,20 @@ def run():
         dbexists = False
         print("DB not exists, so creating new")
 
-    for words in keywords:
-        for item in results:
-            new_report = False
 
-            if USE_JSON:
-                json_data[item['url']] = item['code']
-                new_report = True
+    for item in results:
+        new_report = False
 
-            if USE_SQLITE and (not dbexists or (dbexists and not is_exists(item['url']))):
-                make_db_record(item['url'], item['code'])
-                new_report = True
+        if USE_JSON:
+            json_data[item['url']] = item['matches']
+            new_report = True
 
-            if new_report:
-                reports.append(format_record(item['url'], item['code'], words))
+        if USE_SQLITE and (not dbexists or (dbexists and not is_exists(item['url']))):
+            make_db_record(item['url'], item['matches'])
+            new_report = True
+
+        if new_report:
+            reports.append(format_record(item['url'], item['matches']))
 
     if reports:
         print('Found %d new items!' % (len(reports)))
