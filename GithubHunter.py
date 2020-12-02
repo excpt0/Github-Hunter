@@ -143,8 +143,8 @@ def format_record(url, code, words):
         'Code： <br><div style="border:1px solid #bfd1eb;background:#f3faff">' + formatted + '</div>'
 
 
-def save_report(results):
-    with open(strftime("%a-%d-%b-%Y-%H%M", gmtime()) + '-report.html', 'w') as fileout:
+def save_report(filename, results):
+    with open('{}-report.html'.format(filename), 'w') as fileout:
         fileout.write(results)
 
 
